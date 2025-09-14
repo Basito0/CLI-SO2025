@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 
 //Esta función hace lo que dice: extrae toda la línea de comando de la terminal
 char* GetCommandLine(){
@@ -303,13 +304,14 @@ char** GetArgsVector(char** args_array){
     }
     else{i=2;}
 
-    args = malloc(i * sizeof(char*));
+    args = malloc((i + 1) * sizeof(char*));
 
     //char* argc = args_array[0];
     //char** argv;
 
     args[0] = (char*) malloc( strlen(args_array[0]) + 1 );
     strcpy(args[0], args_array[0]);
+    //printf("el comando es '%s'\n", args[0]);
 
     //si aparte del comando y el resto hay flags entonces agregar a argv
     if(i>2){
@@ -325,8 +327,12 @@ char** GetArgsVector(char** args_array){
             //esto es para args
             args[j-1] = malloc(strlen(args_array[j]) + 1);
             strcpy(args[j-1], args_array[j]);
+            //printf("un argumento es '%s'", args[j-1]);
         }
     }
+    args[i-1] = malloc(sizeof(NULL));
+    args[i-1] = NULL;
+    //printf("el anterior al final es %s\n", args[i-1]);
 
     //Verificación
     /*
@@ -407,7 +413,7 @@ int main()
 
             char* remaining_commands = args_array[1];
 
-            GetArgsVector(args_array);                              //esto es para tener el arreglo en el formato c, flag1, flag2...
+            args_array = GetArgsVector(args_array);                              //esto es para tener el arreglo en el formato c, flag1, flag2...
 
             if(remaining_commands != NULL){
                 remaining_commands = ErasePipe(remaining_commands);
@@ -432,16 +438,16 @@ int main()
         }
 
         //esta es la parte donde se hacen procesos hijos y se asignan pipes y todo eso
-        int pipes[2*(command_number+1)];
+        int pipes[2*(command_number)];
         int f = -1;
         int my_command_index = 0;
-        for(int i = 0; i < command_number; i++){
-            pipe(pipes + 2*i);
+        for(int i = command_number; i > 0; i--){
+            pipe(pipes + 2*(i-1));
             f = fork();
             my_command_index = i;
 
             if(f == 0){
-                my_command_index += 1;
+                my_command_index = i-1;
                 continue;
             }
 
@@ -449,8 +455,57 @@ int main()
             break;
         }
 
-        execvp(command_array[my_command_index][0], command_array[my_command_index]);
-        exit(0);
+        //printf("soy %d y mi index es %d\n", getpid(), my_command_index);
+
+        if(my_command_index == 0){
+            //printf("voy a ejecutar inicio %s\n", command_array[my_command_index][0]);
+            //printf("escribiré en descriptor 1\n");
+
+            close(pipes[0]);
+            dup2(pipes[1], 1);
+            
+            for (int i = 0; i < (2*command_number); i++)
+            {
+                close(pipes[i]);
+            }
+
+            execvp(command_array[my_command_index][0], command_array[my_command_index]);
+
+            exit(0);
+        }
+        else if(my_command_index == command_number){
+            //printf("voy a ejecutar fin %s\n", command_array[my_command_index][0]);
+            //printf("recibiendo de %d", 2*(my_command_index));
+
+            dup2(pipes[2*(my_command_index) - 2], 0);
+
+
+            
+            for (int i = 0; i < (2*command_number); i++)
+            {
+                close(pipes[i]);
+            }
+
+            execvp(command_array[my_command_index][0], command_array[my_command_index]);
+            exit(0);
+        }
+        else{
+            //printf("voy a ejecutar medio %s\n", command_array[my_command_index][0]);
+            //printf("recibiré de %d y escribiré de %d\n", 2*(my_command_index) - 2, 2*(my_command_index) + 1);
+
+            close(pipes[2*(my_command_index)]);
+
+            dup2(pipes[2*(my_command_index) + 1], 1);
+            dup2(pipes[2*(my_command_index) - 2], 0);
+
+            for (int i = 0; i < (2*command_number); i++)
+            {
+                close(pipes[i]);
+            }
+
+            execvp(command_array[my_command_index][0], command_array[my_command_index]);
+            goto restart_loop;
+        }
         /*
         for (int i = 0; i <= command_number; i++)
         {
