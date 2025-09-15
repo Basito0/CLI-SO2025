@@ -16,18 +16,20 @@ char* GetCommandLine(){
 
     if(pStr != NULL)
     {
-    int c = EOF;
-    unsigned int i = 0;
-    while (( c = getchar() ) != '\n' && c != EOF)
-    {
-        pStr[i++] = (char) c;
-        if(i == current_size)
+        int c = EOF;
+        unsigned int i = 0;
+        while (( c = getchar() ) != '\n' && c != EOF)
         {
-            current_size = i+len_max;
-            pStr = realloc(pStr, current_size);
+            pStr[i++] = (char) c;
+            if(i == current_size)
+            {
+                current_size = i+len_max;
+                pStr = realloc(pStr, current_size);
+            }
         }
+        pStr[i] = '\0';
     }
-    }
+
     return pStr;
 }
 
@@ -312,6 +314,9 @@ char** GetArgsVector(char** args_array){
 
     args[0] = (char*) malloc( strlen(args_array[0]) + 1 );
     strcpy(args[0], args_array[0]);
+    if(strcmp(args[0], "exit") == 0){
+        exit(1);
+    }
     //printf("el comando es '%s'\n", args[0]);
 
     //si aparte del comando y el resto hay flags entonces agregar a argv
@@ -388,6 +393,12 @@ int main()
         char*** command_array;
         command_array = malloc(sizeof(char**));
 
+        if(IsStringEmpty(commandline)){
+            free(commandline);
+            free(command_array);
+            goto restart_loop;
+        }
+
         for (int i = 0; i <= command_number; i++)
         {
             //printf("pasando al siguiente comando\n");
@@ -437,6 +448,7 @@ int main()
 
             command_array[i] = args_array;
         }
+
 
         //esta es la parte donde se hacen procesos hijos y se asignan pipes y todo eso
         //STDIN_FILENO es 0
