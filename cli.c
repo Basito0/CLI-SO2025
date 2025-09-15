@@ -6,6 +6,8 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <sys/resource.h>
+#include <time.h>
 
 //Esta función hace lo que dice: extrae toda la línea de comando de la terminal
 char* GetCommandLine(){
@@ -381,6 +383,136 @@ char GetNextCharacter(char* s){
     return '\0';
 }
 
+void MiProfEjec(char** args){
+    pid_t pid = fork();
+    struct rusage usage;
+    struct timeval ustart, uend;
+    struct timeval sstart, send;
+    struct timespec rstart, rend;
+    long mend;
+
+    getrusage(RUSAGE_CHILDREN, &usage);
+    ustart = usage.ru_utime;
+    sstart = usage.ru_stime;
+    clock_gettime(CLOCK_REALTIME, &rstart);
+
+    if(pid == 0){
+        execvp(args[2], args + 2);
+        perror(args[2]);
+        exit(1);
+    }
+
+    wait(NULL);
+
+    getrusage(RUSAGE_CHILDREN, &usage);
+    uend = usage.ru_utime;
+    send = usage.ru_stime;
+    mend = usage.ru_maxrss;
+    clock_gettime(CLOCK_REALTIME, &rend);
+
+    time_t user_sec = uend.tv_sec - ustart.tv_sec;
+    time_t sys_sec = send.tv_sec - sstart.tv_sec;
+    suseconds_t user_usec = uend.tv_usec - ustart.tv_usec;
+    suseconds_t sys_usec = send.tv_usec - sstart.tv_usec; 
+    time_t r_sec = rend.tv_sec - rstart.tv_sec;
+    long r_nsec = rend.tv_nsec - rstart.tv_nsec;
+
+    printf("User time: %ld.%06ld \n", user_sec, user_usec);
+    printf("System time: %ld.%06ld \n", sys_sec, sys_usec);
+    printf("Real time: %ld nanosegundos \n", r_nsec);
+    printf("Maximum Resident Set: %ld KB\n\n", mend);
+}
+
+void MiProfEjecSave(char** args){
+
+    int fd = open(args[2], O_WRONLY | O_CREAT | O_APPEND,
+              S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    ssize_t bytes_written;
+    const char *command = args[3];
+    const char *linejump = "\n";
+
+    bytes_written = write(fd, command, strlen(command));
+    if (bytes_written == -1) {
+        perror(command);
+    }
+    write(fd, linejump, 1);
+
+    pid_t pid = fork();
+    struct rusage usage;
+    struct timeval ustart, uend;
+    struct timeval sstart, send;
+    struct timespec rstart, rend;
+
+    long mend;
+
+    getrusage(RUSAGE_CHILDREN, &usage);
+    ustart = usage.ru_utime;
+    sstart = usage.ru_stime;
+    clock_gettime(CLOCK_REALTIME, &rstart);
+
+    if(pid == 0){
+        execvp(args[3], args + 3);
+        perror(args[3]);
+        exit(1);
+    }
+
+    wait(NULL);
+
+    getrusage(RUSAGE_CHILDREN, &usage);
+    uend = usage.ru_utime;
+    send = usage.ru_stime;
+    mend = usage.ru_maxrss;
+    clock_gettime(CLOCK_REALTIME, &rend);
+
+    time_t user_sec = uend.tv_sec - ustart.tv_sec;
+    time_t sys_sec = send.tv_sec - sstart.tv_sec;
+    suseconds_t user_usec = uend.tv_usec - ustart.tv_usec;
+    suseconds_t sys_usec = send.tv_usec - sstart.tv_usec;
+    time_t r_sec = rend.tv_sec - rstart.tv_sec;
+    long r_nsec = rend.tv_nsec - rstart.tv_nsec;
+
+    char user_time[100];
+    char system_time[100];
+    char real_time[100];
+    char mrs[100];
+
+    snprintf(user_time, sizeof(user_time),"User time: %ld.%06ld segundos\n", user_sec, user_usec);
+    snprintf(system_time, sizeof(system_time),"System time: %ld.%06ld segundos\n", sys_sec, sys_usec);
+    snprintf(real_time, sizeof(real_time),"Real time: %ld nanosegundos\n", r_nsec);
+    snprintf(mrs, sizeof(mrs),"Maximum Resident Set: %ld KB\n\n", mend);
+
+    printf("User time: %ld.%06ld \n", user_sec, user_usec);
+    printf("System time: %ld.%06ld \n", sys_sec, sys_usec);
+    printf("Real time: %ld nanosegundos \n", r_nsec);
+    printf("Maximum Resident Set: %ld KB\n\n", mend);
+
+    write(fd, user_time, strlen(user_time));
+    write(fd, system_time, strlen(system_time));
+    write(fd, real_time, strlen(real_time));
+    write(fd, mrs, strlen(mrs));
+}
+
+void MiProf(char** args){
+    //printf("hola voy a ejecutar miprof :D");
+    int i = 0;
+
+    while(args[i] != NULL){
+        i++;
+    }
+
+    i = i-1;    //facilitar iteraciones
+
+    if (strcmp(args[1], "ejec") == 0)
+    {
+        MiProfEjec(args);
+    }
+    else if (strcmp(args[1], "ejecsave") == 0){
+        MiProfEjecSave(args);
+    }
+    //AGREGAR OTROS MIPROF
+
+}
+
 int main()
 {
     //While 1 para pedir comando todo el rato
@@ -477,6 +609,21 @@ int main()
                 for (int j = 0; j < 2*command_number; j++) {
                     close(pipes[j]);
                 }
+
+                //Esto es para ejecutar MiProf
+                if(strcmp(command_array[i][0], "miprof") == 0){
+                    MiProf(command_array[i]);
+                    free(commandline);
+                    free(command_array);
+
+                    if (i == command_number)
+                    {
+                        goto restart_loop;
+                    }
+
+                    exit(1);
+                }
+
                 execvp(command_array[i][0], command_array[i]);
                 perror(command_array[i][0]);
                 exit(1);
