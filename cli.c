@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <fcntl.h>
+#include <errno.h>
 
 //Esta función hace lo que dice: extrae toda la línea de comando de la terminal
 char* GetCommandLine(){
@@ -438,85 +439,49 @@ int main()
         }
 
         //esta es la parte donde se hacen procesos hijos y se asignan pipes y todo eso
-        int pipes[2*(command_number)];
-        int f = -1;
-        int my_command_index = 0;
-        for(int i = command_number; i > 0; i--){
-            pipe(pipes + 2*(i-1));
-            f = fork();
-            my_command_index = i;
-
-            if(f == 0){
-                my_command_index = i-1;
-                continue;
+        //STDIN_FILENO es 0
+        //STDOUT_FILENO es 1
+        int pipes[2 * command_number];
+        for (int i = 0; i < command_number; i++) {
+            if (pipe(pipes + 2*i) < 0) {
+                perror("pipe");
+                exit(1);
             }
+        }
 
+        for (int i = 0; i <= command_number; i++) {
+            pid_t pid = fork();
+            if (pid < 0) {
+                perror("fork");
+                exit(1);
+            }
+            if (pid == 0) {
+                if (i > 0) {
+                    dup2(pipes[2*(i-1)], STDIN_FILENO);
+                }
+                if (i < command_number) {
+                    dup2(pipes[2*i + 1], STDOUT_FILENO);
+                }
+                for (int j = 0; j < 2*command_number; j++) {
+                    close(pipes[j]);
+                }
+                execvp(command_array[i][0], command_array[i]);
+                perror(command_array[i][0]);
+                exit(1);
+            }
+        }
+
+        for (int j = 0; j < 2*command_number; j++) {
+            close(pipes[j]);
+        }
+        for (int i = 0; i <= command_number; i++) {
             wait(NULL);
-            break;
         }
 
-        //printf("soy %d y mi index es %d\n", getpid(), my_command_index);
-
-        if(my_command_index == 0){
-            //printf("voy a ejecutar inicio %s\n", command_array[my_command_index][0]);
-            //printf("escribiré en descriptor 1\n");
-
-            close(pipes[0]);
-            dup2(pipes[1], 1);
-            
-            for (int i = 0; i < (2*command_number); i++)
-            {
-                close(pipes[i]);
-            }
-
-            execvp(command_array[my_command_index][0], command_array[my_command_index]);
-
-            exit(0);
-        }
-        else if(my_command_index == command_number){
-            //printf("voy a ejecutar fin %s\n", command_array[my_command_index][0]);
-            //printf("recibiendo de %d", 2*(my_command_index));
-
-            dup2(pipes[2*(my_command_index) - 2], 0);
-
-
-            
-            for (int i = 0; i < (2*command_number); i++)
-            {
-                close(pipes[i]);
-            }
-
-            execvp(command_array[my_command_index][0], command_array[my_command_index]);
-            exit(0);
-        }
-        else{
-            //printf("voy a ejecutar medio %s\n", command_array[my_command_index][0]);
-            //printf("recibiré de %d y escribiré de %d\n", 2*(my_command_index) - 2, 2*(my_command_index) + 1);
-
-            close(pipes[2*(my_command_index)]);
-
-            dup2(pipes[2*(my_command_index) + 1], 1);
-            dup2(pipes[2*(my_command_index) - 2], 0);
-
-            for (int i = 0; i < (2*command_number); i++)
-            {
-                close(pipes[i]);
-            }
-
-            execvp(command_array[my_command_index][0], command_array[my_command_index]);
-            goto restart_loop;
-        }
-        /*
-        for (int i = 0; i <= command_number; i++)
-        {
-            //printf("%s\n", command_array[command_number-i][0]);   command_number - i es el index del comando a usar ahora
-
-            f = fork();
-            wait();
-        }
-        */
-
+        // free and loop back for next prompt
         free(commandline);
+        free(command_array);
+        goto restart_loop;
     }
 
     return 0;
