@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <sys/resource.h>
 #include <time.h>
+#include <stdint.h>
 
 //Esta función hace lo que dice: extrae toda la línea de comando de la terminal
 char* GetCommandLine(){
@@ -383,6 +384,12 @@ char GetNextCharacter(char* s){
     return '\0';
 }
 
+void handle_sigalr(int sig) {
+    printf("Received SIGALR (%d). Cleaning up and exiting...\n", sig);
+    // Perform cleanup operations here
+    _exit(0); // Use _exit() for safety in signal handlers
+}
+
 void MiProfEjec(char** args){
     pid_t pid = fork();
     struct rusage usage;
@@ -417,9 +424,16 @@ void MiProfEjec(char** args){
     time_t r_sec = rend.tv_sec - rstart.tv_sec;
     long r_nsec = rend.tv_nsec - rstart.tv_nsec;
 
-    printf("User time: %ld.%06ld \n", user_sec, user_usec);
-    printf("System time: %ld.%06ld \n", sys_sec, sys_usec);
-    printf("Real time: %ld nanosegundos \n", r_nsec);
+    if (r_nsec < 0) {
+        r_sec  -= 1;
+        r_nsec += 1000000000L;
+    }
+
+    uint64_t milliseconds = (uint64_t)r_sec * 1000U + (uint64_t)r_nsec / 1000000U;
+
+    printf("User time: %ld.%06ld s\n", user_sec, user_usec);
+    printf("System time: %ld.%06ld s\n", sys_sec, sys_usec);
+    printf("Real time: %ld ms \n", milliseconds);
     printf("Maximum Resident Set: %ld KB\n\n", mend);
 }
 
@@ -471,25 +485,88 @@ void MiProfEjecSave(char** args){
     time_t r_sec = rend.tv_sec - rstart.tv_sec;
     long r_nsec = rend.tv_nsec - rstart.tv_nsec;
 
+    if (r_nsec < 0) {
+        r_sec  -= 1;
+        r_nsec += 1000000000L;
+    }
+
+    uint64_t milliseconds = (uint64_t)r_sec * 1000U + (uint64_t)r_nsec / 1000000U;
+
     char user_time[100];
     char system_time[100];
     char real_time[100];
     char mrs[100];
 
-    snprintf(user_time, sizeof(user_time),"User time: %ld.%06ld segundos\n", user_sec, user_usec);
-    snprintf(system_time, sizeof(system_time),"System time: %ld.%06ld segundos\n", sys_sec, sys_usec);
-    snprintf(real_time, sizeof(real_time),"Real time: %ld nanosegundos\n", r_nsec);
+    snprintf(user_time, sizeof(user_time),"User time: %ld.%06ld s\n", user_sec, user_usec);
+    snprintf(system_time, sizeof(system_time),"System time: %ld.%06ld s\n", sys_sec, sys_usec);
+    snprintf(real_time, sizeof(real_time),"Real time: %ld ms\n", milliseconds);
     snprintf(mrs, sizeof(mrs),"Maximum Resident Set: %ld KB\n\n", mend);
 
-    printf("User time: %ld.%06ld \n", user_sec, user_usec);
-    printf("System time: %ld.%06ld \n", sys_sec, sys_usec);
-    printf("Real time: %ld nanosegundos \n", r_nsec);
+    printf("User time: %ld.%06ld segundos\n", user_sec, user_usec);
+    printf("System time: %ld.%06ld segundos\n", sys_sec, sys_usec);
+    printf("Real time: %ld milisegundos \n", milliseconds);
     printf("Maximum Resident Set: %ld KB\n\n", mend);
 
     write(fd, user_time, strlen(user_time));
     write(fd, system_time, strlen(system_time));
     write(fd, real_time, strlen(real_time));
     write(fd, mrs, strlen(mrs));
+}
+
+void MiProfMaxtime(char** args){
+    pid_t pid = fork();
+    struct rusage usage;
+    struct timeval ustart, uend;
+    struct timeval sstart, send;
+    struct timespec rstart, rend;
+    long mend;
+
+    getrusage(RUSAGE_CHILDREN, &usage);
+    ustart = usage.ru_utime;
+    sstart = usage.ru_stime;
+    clock_gettime(CLOCK_REALTIME, &rstart);
+
+    if(pid == 0){
+        execvp(args[3], args + 3);
+        perror(args[3]);
+        exit(1);
+    }
+
+    if (signal(SIGALRM, handle_sigalr) == SIG_ERR) {
+        perror("Error setting signal handler");
+        _exit(1);
+    }
+
+    alarm(atoi(args[2]));
+
+    while (1) {
+        sleep(1);
+    }
+
+    getrusage(RUSAGE_CHILDREN, &usage);
+    uend = usage.ru_utime;
+    send = usage.ru_stime;
+    mend = usage.ru_maxrss;
+    clock_gettime(CLOCK_REALTIME, &rend);
+
+    time_t user_sec = uend.tv_sec - ustart.tv_sec;
+    time_t sys_sec = send.tv_sec - sstart.tv_sec;
+    suseconds_t user_usec = uend.tv_usec - ustart.tv_usec;
+    suseconds_t sys_usec = send.tv_usec - sstart.tv_usec; 
+    time_t r_sec = rend.tv_sec - rstart.tv_sec;
+    long r_nsec = rend.tv_nsec - rstart.tv_nsec;
+
+    if (r_nsec < 0) {
+        r_sec  -= 1;
+        r_nsec += 1000000000L;
+    }
+
+    uint64_t milliseconds = (uint64_t)r_sec * 1000U + (uint64_t)r_nsec / 1000000U;
+
+    printf("User time: %ld.%06ld s\n", user_sec, user_usec);
+    printf("System time: %ld.%06ld s\n", sys_sec, sys_usec);
+    printf("Real time: %ld ms \n", milliseconds);
+    printf("Maximum Resident Set: %ld KB\n\n", mend);
 }
 
 void MiProf(char** args){
@@ -508,6 +585,9 @@ void MiProf(char** args){
     }
     else if (strcmp(args[1], "ejecsave") == 0){
         MiProfEjecSave(args);
+    }
+    else if (strcmp(args[1], "ejecutar") == 0){
+        MiProfMaxtime(args);
     }
     //AGREGAR OTROS MIPROF
 
