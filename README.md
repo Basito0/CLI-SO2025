@@ -9,4 +9,4 @@ Para ejecutar la línea de comandos se recomienda usar la última versión de Ub
 Si, en cambio, desea compilar el código usted mismo, deberá hacer uso de gcc cli.c.
 
 Una vez que esté ejecutando el código, verá el siguiente prompt:
-![Prompt shown when a command is required,]([https://myoctocat.com/assets/images/base-octocat.svg](https://github.com/Basito0/CLI-SO2025/blob/main/assets/images/cli1.PNG))
+![Prompt shown when a command is required,](/assets/images/cli1.PNG)
